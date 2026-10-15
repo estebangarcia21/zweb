@@ -1,0 +1,5 @@
+> zweb init smoke.app
+$ exists zweb.conf
+> zweb doctor
+> compile
+> test
