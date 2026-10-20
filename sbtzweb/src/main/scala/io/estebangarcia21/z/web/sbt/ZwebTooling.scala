@@ -4,10 +4,8 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path}
 import java.security.MessageDigest
 import java.util.HexFormat
-import java.util.concurrent.{TimeUnit, TimeoutException}
+import java.util.concurrent.TimeUnit
 import scala.collection.JavaConverters._
-import scala.util.Try
-import scala.util.control.NonFatal
 
 import Support._
 
@@ -18,6 +16,7 @@ private[sbt] object ZwebTooling {
     "  zweb init <scala-package>",
     "  zweb dev",
     "  zweb dev hot",
+    "  zweb dev restart",
     "  zweb doctor",
     "  zweb icon add <lucide-name>",
     "  zweb icon remove <lucide-name>",
@@ -63,46 +62,6 @@ private[sbt] object ZwebTooling {
         Left("Unknown Zweb command. Run sbt \"zweb help\" for usage.")
     }
 
-  def stopDevelopmentPort(port: Int): Either[String, Seq[String]] =
-    try {
-      val lookup = new ProcessBuilder(
-        "lsof",
-        "-nP",
-        s"-tiTCP:$port",
-        "-sTCP:LISTEN"
-      ).redirectErrorStream(true).start()
-      val output = new String(lookup.getInputStream.readAllBytes(), StandardCharsets.UTF_8).trim
-      val exit = lookup.waitFor()
-
-      if (exit != 0 && output.nonEmpty)
-        Left(s"Could not inspect development port $port: $output")
-      else {
-        val pids = output
-          .split("\\s+")
-          .toSeq
-          .filter(_.nonEmpty)
-          .flatMap(value => Try(value.toLong).toOption)
-        val stopped = pids.flatMap { pid =>
-          val process = java.lang.ProcessHandle.of(pid)
-
-          if (process.isPresent) {
-            stop(process.get())
-            Some(pid)
-          } else None
-        }
-
-        Right(
-          if (stopped.isEmpty) Seq(s"Development port $port is available.")
-          else Seq(s"Stopped ${stopped.mkString(", ")} on development port $port.")
-        )
-      }
-    } catch {
-      case _: java.io.IOException =>
-        Left(s"lsof is required to free development port $port.")
-      case NonFatal(error) =>
-        Left(s"Could not prepare development port $port: ${safeMessage(error)}")
-    }
-
   def hotSwapJvmOptions(javaHome: Path, autoRefresh: Boolean): Either[String, Seq[String]] = {
     val agent = javaHome.resolve("lib/hotswap/hotswap-agent.jar")
 
@@ -145,15 +104,6 @@ private[sbt] object ZwebTooling {
 
         HexFormat.of().formatHex(digest.digest())
       } finally files.close()
-    }
-  }
-
-  private def stop(process: java.lang.ProcessHandle): Unit = {
-    process.destroy()
-
-    try process.onExit().get(2, TimeUnit.SECONDS)
-    catch {
-      case _: TimeoutException => process.destroyForcibly()
     }
   }
 

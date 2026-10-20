@@ -32,7 +32,7 @@ includes source project dependencies automatically. Testkit belongs only on the 
 
 ```scala
 import io.estebangarcia21.z.web.*
-import scalatags.Text.all.*
+import scalatags.Text.all.{div, h1}
 import zio.*
 import zio.http.*
 
@@ -40,6 +40,28 @@ object Main extends ZIOAppDefault:
   private val view = page[Unit](_ => PageMeta("Hello"))(_ => div(h1("Hello")))
   def run = Zweb.serve(Routes(Method.GET / "" -> handler(html(view(())))))
 ```
+
+Routes can retain their application services in the ZIO environment until startup. For example,
+replace the `Main` above with:
+
+```scala
+/** Application-owned data supplied through a ZLayer. */
+final case class Greeting(text: String)
+
+object Main extends ZIOAppDefault:
+  private val view = page[String](_ => PageMeta("Hello"))(text => div(h1(text)))
+
+  private val routes: Routes[Greeting, Response] = Routes(
+    Method.GET / "" -> handler(ZIO.serviceWith[Greeting](greeting => html(view(greeting.text))))
+  )
+
+  def run = Zweb.serve(routes).provide(ZLayer.succeed(Greeting("Hello")))
+```
+
+Use `sbt "zweb dev"` for compile/restart, automatic browser refresh, and CSS replacement without
+losing document state. `Zweb.serve` installs development endpoints automatically; production does
+not expose them. Serve development assets from `Zweb.developmentAssetDirectory`. See the
+[development contract](development.md) for optional JBR hot swapping and restart boundaries.
 
 Enable `ZwebPlugin` in a consuming build. Configure `zweb.conf` with an application Scala package
 and asset directory. The `zweb init`, `zweb doctor`, `zweb dev`, `zweb icon`, and `zweb js` commands

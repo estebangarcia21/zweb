@@ -2,12 +2,16 @@ package io.estebangarcia21.z.web.sbt
 
 import sbt._
 import sbt.Keys._
+import sbt.nio.Keys.watchTriggers
+import sbt.nio.file.Glob
 import sbt.plugins.JvmPlugin
 import spray.revolver.RevolverPlugin
 import spray.revolver.RevolverCorePlugin.autoImport._
 import spray.revolver.RevolverPlugin.autoImport._
 
+import java.io.FileOutputStream
 import java.nio.file.Paths
+import java.util.Properties
 
 /** Adds the matching Zweb runtime and testkit and registers the `zweb` command. */
 object ZwebPlugin extends AutoPlugin {
@@ -19,6 +23,11 @@ object ZwebPlugin extends AutoPlugin {
 
     val zwebAddLibrary =
       settingKey[Boolean]("Whether Zweb adds its matching runtime and testkit dependencies.")
+
+    val zwebDev =
+      taskKey[Unit](
+        "Compile and restart the managed application when code or configuration changes."
+      )
 
     val zwebHotCompile =
       taskKey[Unit]("Compile sources and publish a browser reload version when classes change.")
@@ -47,10 +56,47 @@ object ZwebPlugin extends AutoPlugin {
         else Nil
       },
       reStart / aggregate := false,
+      zwebDev / aggregate := false,
+      zwebHotCompile / aggregate := false,
+      zwebDev / watchTriggers += Glob(zwebConfigFile.value.toPath),
+      zwebDev := Def.taskDyn {
+        (Compile / compile).value
+
+        val loaded = loadConfig(baseDirectory.value, zwebConfigFile.value)
+        val classpath = (Runtime / fullClasspath).value.map(_.data)
+        val resourceInputs = (Compile / resources).value.filterNot(file =>
+          file.toPath.toAbsolutePath.normalize().startsWith(loaded.assetsDirectory.toPath)
+        )
+        val inputs = resourceInputs :+ loaded.configFile
+        val version = classpath
+          .map { file =>
+            if (file.isDirectory) ZwebTooling.classTreeVersion(file.toPath)
+            else s"${file.getAbsolutePath}:${file.length()}:${file.lastModified()}"
+          }
+          .mkString("\n") + inputs
+          .map(file => s"${file.getAbsolutePath}:${file.length()}:${file.lastModified()}")
+          .mkString("\n")
+        val stamp = target.value / "zweb-dev.version"
+
+        if (!stamp.isFile || IO.read(stamp) != version) Def.task {
+          reStart.toTask("").value
+
+          IO.write(stamp, version)
+        }
+        else Def.task { () }
+      }.value,
       reStart / fullClasspath ++= {
         // The agent reads this from the child classpath to watch sbt's freshly compiled classes.
         val configDirectory = target.value / "zweb-hot-config"
-        IO.write(configDirectory / "hotswap-agent.properties", "autoHotswap=true\n")
+        IO.createDirectory(configDirectory)
+        val properties = new Properties()
+        properties.setProperty("autoHotswap", "true")
+        properties.setProperty("LOGGER.org.hotswap.agent.config.PluginManager", "debug")
+        properties.setProperty("LOGFILE", (configDirectory / "agent.log").getAbsolutePath)
+        val output = new FileOutputStream(configDirectory / "hotswap-agent.properties")
+
+        try properties.store(output, "Zweb development agent")
+        finally output.close()
         IO.write(
           configDirectory / "reload.stamp",
           ZwebTooling.classTreeVersion((Compile / classDirectory).value.toPath)
@@ -79,6 +125,8 @@ object ZwebPlugin extends AutoPlugin {
 
         Seq(
           "-Dzweb.development=true",
+          s"-Dzweb.port=${loaded.developmentPort}",
+          s"-Dzweb.liveReload=${loaded.developmentAutoRefresh}",
           s"-Dzweb.assetDirectory=${loaded.assetsDirectory.getAbsolutePath}",
           s"-Dzweb.reloadStampFile=${(target.value / "zweb-hot-config" / "reload.stamp").getAbsolutePath}"
         )
@@ -96,42 +144,36 @@ object ZwebPlugin extends AutoPlugin {
         case Left(error) =>
           state.log.error(error)
           state.fail
-        case Right(config) if arguments == Seq("dev") =>
-          ZwebTooling.stopDevelopmentPort(config.developmentPort) match {
-            case Left(error) =>
-              state.log.error(error)
-              state.fail
-            case Right(messages) =>
-              messages.foreach(message => state.log.info(message))
-              Command.process("~reStart", state, error => state.log.error(error))
-          }
+        case Right(_) if arguments == Seq("dev") || arguments == Seq("dev", "restart") =>
+          // Revolver owns its child process. Never terminate an unrelated port listener.
+          IO.delete(extracted.get(current / target) / "zweb-dev.version")
+          Command.process("~zwebDev", state, error => state.log.error(error))
         case Right(config) if arguments == Seq("dev", "hot") =>
-          ZwebTooling
-            .hotSwapJvmOptions(
-              Paths.get(sys.props("java.home")),
-              config.developmentAutoRefresh
-            ) match {
+          val childJavaHome = extracted
+            .get(current / javaHome)
+            .map(_.toPath)
+            .getOrElse(Paths.get(sys.props("java.home")))
+
+          ZwebTooling.hotSwapJvmOptions(childJavaHome, config.developmentAutoRefresh) match {
             case Left(error) =>
-              state.log.error(error)
-              state.fail
+              state.log.warn(error + " Falling back to restart development.")
+              IO.delete(extracted.get(current / target) / "zweb-dev.version")
+              Command.process("~zwebDev", state, failure => state.log.error(failure))
             case Right(options) =>
-              ZwebTooling.stopDevelopmentPort(config.developmentPort) match {
-                case Left(error) =>
-                  state.log.error(error)
-                  state.fail
-                case Right(messages) =>
-                  messages.foreach(message => state.log.info(message))
-                  val started = Command.process(
-                    s"reStart --- ${options.mkString(" ")}",
-                    state,
-                    error => state.log.error(error)
-                  )
+              state.log.warn(
+                "Hot swap is best effort: route tables, layers and configuration require zweb dev restart."
+              )
+              val logFile = extracted.get(current / target) / "zweb-hot-config" / "agent.log"
+              state.log.info(s"Hot swap diagnostics: $logFile")
+              val acknowledgedOptions =
+                options :+ s"-Dzweb.hotswapLogFile=${logFile.getAbsolutePath}"
+              val started = Command.process(
+                s"reStart --- ${acknowledgedOptions.map(option => "\"" + option + "\"").mkString(" ")}",
+                state,
+                error => state.log.error(error)
+              )
 
-                  val watchedTask =
-                    if (config.developmentAutoRefresh) "~zwebHotCompile" else "~compile"
-
-                  Command.process(watchedTask, started, error => started.log.error(error))
-              }
+              Command.process("~zwebHotCompile", started, error => started.log.error(error))
           }
         case Right(config) =>
           ZwebTooling.run(arguments, config) match {

@@ -4,6 +4,8 @@ import scalatags.Text.Frag
 import scalatags.Text.all.*
 import scalatags.Text.tags2.title
 
+import java.nio.charset.StandardCharsets
+
 /** Stylesheet and JavaScript module URLs rendered into an HTML document. */
 final case class Assets(css: List[String] = Nil, js: List[String] = Nil)
 
@@ -113,7 +115,7 @@ object Layout:
         ),
         body(
           content,
-          Option.when(Zweb.liveReloadEnabled)(reloadScript(Zweb.liveReloadVersion))
+          Option.when(Zweb.liveReloadEnabled)(reloadScript(Zweb.serverInstance))
         )
       )
     )
@@ -122,33 +124,12 @@ object Layout:
     script(src := "/_zweb/live-reload.js", attr("data-zweb-version") := version)
 
   // A same-origin external script works with script-src 'self'; hot refresh needs no inline exception.
-  private[web] val liveReloadJavaScript: String = """(() => {
-  let version = document.currentScript.dataset.zwebVersion;
+  private[web] lazy val liveReloadJavaScript: String =
+    val stream = getClass.getResourceAsStream("/zweb/live-reload.js")
 
-  async function poll() {
-    try {
-      const response = await fetch("/_zweb/live-reload", {
-        cache: "no-store",
-        credentials: "same-origin"
-      });
-
-      if (response.ok) {
-        const next = await response.text();
-
-        if (next !== version) {
-          window.setTimeout(() => window.location.reload(), 400);
-          return;
-        }
-      }
-    } catch (_) {
-      // Retry when the development server comes back.
-    }
-
-    window.setTimeout(poll, 1000);
-  }
-
-  window.setTimeout(poll, 1000);
-})();"""
+    require(stream != null, "Missing Zweb development client")
+    try new String(stream.readAllBytes(), StandardCharsets.UTF_8)
+    finally stream.close()
 
   private def stylesheet(path: String): Frag =
     link(rel := "stylesheet", href := Zweb.assetUrl(path))

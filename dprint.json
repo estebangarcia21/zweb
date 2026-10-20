@@ -1,0 +1,11 @@
+{
+  "includes": ["src/main/resources/zweb/**/*.js"],
+  "lineWidth": 100,
+  "indentWidth": 2,
+  "newLineKind": "lf",
+  "typescript": {
+    "quoteStyle": "preferDouble",
+    "semiColons": "always"
+  },
+  "plugins": ["https://plugins.dprint.dev/typescript-0.96.1.wasm"]
+}

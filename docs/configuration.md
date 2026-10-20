@@ -25,10 +25,14 @@ zweb {
 `scala-package` is required only for icon generation. When it is present, `icons-output` defaults to
 an `Icons.scala` in that package and normally should be omitted. `assets-directory` and
 `development.port` and `development.auto-refresh` have the values shown above by default.
-`auto-refresh` controls the browser polling script and reload endpoint in `zweb dev hot` only.
-Set it to `false` to keep class hot swapping while refreshing the browser manually. Restart the hot
-watch after changing this setting. Ordinary `zweb dev` and production launches never inject the
-polling script.
+`auto-refresh` controls the browser client and reload endpoints in both `zweb dev` and
+`zweb dev hot`. Set it to `false` to refresh manually while retaining compilation and
+restart/hot-swap behavior. Production launches never inject the client.
+
+`development.port` is supplied to the child process and used by `Zweb.serve(routes)`.
+An explicit `Zweb.serve(routes, port)` overrides it. It never authorizes terminating another
+process listening on that port. See [development](development.md) for watch behavior, hot-swap
+limitations, runtime environment alternatives, and startup failure handling.
 
 All configured paths must resolve inside the consuming project. This keeps commands scoped to the
 repository where sbt invoked them. Use project-relative paths so configuration remains portable.
