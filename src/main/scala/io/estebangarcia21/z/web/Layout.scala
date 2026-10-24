@@ -16,12 +16,14 @@ final case class Favicon(path: String, mediaType: String = "image/png")
   *
   * Zweb intentionally supplies no global CSS, JavaScript, or favicon by default. Applications opt
   * into those assets through one renderer rather than placing product-specific policy in the
-  * library.
+  * library. `headContent` appends trusted ScalaTags elements after standard metadata and assets;
+  * their URLs and attributes remain application-owned.
   */
 final case class DocumentConfig(
     language: String = "en",
     globalAssets: Assets = Assets(),
-    favicon: Option[Favicon] = None
+    favicon: Option[Favicon] = None,
+    headContent: Frag = frag()
 )
 
 /** Open Graph values rendered as `og:*` metadata for a complete page. */
@@ -32,14 +34,17 @@ final case class OpenGraph(
     image: Option[String] = None
 )
 
-/** Metadata and page-specific browser assets required for one complete HTML document. */
+/** Metadata, browser assets and additional head elements for one complete HTML document.
+  * `headContent` follows the shared head content; it adds elements without replacing defaults.
+  */
 final case class PageMeta(
     title: String,
     assets: Assets = Assets(),
     robots: Option[String] = None,
     description: Option[String] = None,
     canonicalUrl: Option[String] = None,
-    openGraph: Option[OpenGraph] = None
+    openGraph: Option[OpenGraph] = None,
+    headContent: Frag = frag()
 )
 
 /** Anything that can render typed data to HTML. */
@@ -69,7 +74,9 @@ def page[A](meta: A => PageMeta)(bodyView: View[A]): View[A] =
 /** Owns the generic HTML document skeleton and deterministic asset ordering. */
 object Layout:
 
-  /** Renders global assets before page-specific assets and versions them in development mode. */
+  /** Renders global assets before page assets, then shared and page head fragments in order. Only
+    * asset-list and favicon URLs are automatically versioned in development mode.
+    */
   def render(config: DocumentConfig, metaData: PageMeta, content: Frag): Frag =
     frag(
       raw("<!doctype html>"),
@@ -111,7 +118,9 @@ object Layout:
           config.globalAssets.css.map(stylesheet),
           metaData.assets.css.map(stylesheet),
           config.globalAssets.js.map(module),
-          metaData.assets.js.map(module)
+          metaData.assets.js.map(module),
+          config.headContent,
+          metaData.headContent
         ),
         body(
           content,

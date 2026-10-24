@@ -35,6 +35,8 @@ path printed at completion for diagnosis. These checks do not use Squiggly Money
 Publication must finish before starting a consumer test; run the two modes sequentially.
 
 The runtime tests cover separated asset versions, deletion detection, successful agent acknowledgement (including incomplete/failed records), development port validation,
-production endpoint exclusion, and document rendering. The live checks complement these tests;
+production endpoint exclusion, and document rendering (head composition, escaping, per-render page data, default output and
+coexistence with development refresh). The scripted consumer checks custom head elements through
+the DOM from a separately compiled application. The live checks complement these tests;
 option-string tests alone are not proof that hot swapping works. Run `./scripts/format.sc` followed
 by `./scripts/formatCheck.sc` for source formatting.

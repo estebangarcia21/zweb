@@ -24,6 +24,68 @@ object RuntimeSpec extends ZIOSpecDefault:
         )
       )
     },
+    test("composes shared and per-page head fragments without editing rendered HTML") {
+      val renderer = PageRenderer(
+        DocumentConfig(
+          globalAssets = Assets(css = List("/global.css")),
+          headContent = frag(
+            meta(attr("name") := "shared", attr("content") := "<unsafe> & \"quoted\""),
+            script(src := "/classic.js", defer)
+          )
+        )
+      )
+      val view = renderer.page[String](value =>
+        PageMeta(
+          "Example",
+          assets = Assets(js = List("/page.js")),
+          headContent = link(rel := "alternate", href := s"/feed?name=$value")
+        )
+      )(value => div(value, script(raw("const closingHead = '</head>';"))))
+      val first = view("one & two").render
+      val second = view("other").render
+
+      assertTrue(
+        first.indexOf("/page.js") < first.indexOf("name=\"shared\""),
+        first.indexOf("name=\"shared\"") < first.indexOf("rel=\"alternate\""),
+        first.contains("&lt;unsafe&gt; &amp; &quot;quoted&quot;"),
+        first.contains("/feed?name=one &amp; two"),
+        first.contains("src=\"/classic.js\" defer"),
+        first.contains("const closingHead = '</head>';"),
+        second.contains("/feed?name=other"),
+        !second.contains("/feed?name=one")
+      )
+    },
+    test("default documents keep optional head content empty") {
+      val document = page[Unit](_ => PageMeta("Default"))(_ => div("Body"))(()).render
+
+      assertTrue(
+        document.startsWith("<!doctype html>"),
+        document.contains("<title>Default</title></head><body><div>Body</div>"),
+        !document.contains("<script"),
+        !document.contains("<link")
+      )
+    },
+    test("custom head fragments coexist with development assets and the reload client") {
+      withProperties(Map("zweb.development" -> "true", "zweb.liveReload" -> "true")) {
+        ZIO.attempt {
+          val renderer = PageRenderer(
+            DocumentConfig(
+              globalAssets = Assets(css = List("/global.css")),
+              headContent = link(rel := "manifest", href := "/app.webmanifest")
+            )
+          )
+          val document =
+            renderer.page[Unit](_ => PageMeta("Development"))(_ => div("Body"))(()).render
+
+          assertTrue(
+            document.contains(s"/global.css?v=${Zweb.serverInstance}"),
+            document.contains("href=\"/app.webmanifest\""),
+            document.contains("src=\"/_zweb/live-reload.js\""),
+            document.indexOf("/app.webmanifest") < document.indexOf("<body>")
+          )
+        }
+      }
+    },
     test("retains existing query and fragment when versioning assets") {
       assertTrue(
         Zweb.versionAssetUrl("/app.js?a=1#anchor", "42") == "/app.js?a=1&v=42#anchor",

@@ -11,3 +11,6 @@ HTML views are pure ScalaTags functions. Use `io.estebangarcia21.z.web.html` to 
 preserve the current document. Optional `zweb dev hot` uses JBR enhanced class redefinition.
 See [development](docs/development.md) for the precise reload contract and hot-swap limitations.
 Production assets and caching remain application-owned.
+
+See [document rendering](docs/rendering.md) for shared and page-specific head fragments, metadata,
+asset ordering and escaping.
